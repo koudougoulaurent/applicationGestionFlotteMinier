@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-mine-bg text-mine-text font-sans;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #111827; }
+  ::-webkit-scrollbar-thumb { background: #1e2d45; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2d4a6e; }
+}
+
+@layer components {
+  .card {
+    @apply bg-mine-card border border-mine-border rounded-xl p-4;
+  }
+
+  .card-header {
+    @apply text-sm font-semibold text-mine-muted uppercase tracking-wider mb-3;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+  }
+
+  .btn-primary {
+    @apply bg-amber-500 text-black px-4 py-2 rounded font-semibold text-sm
+           hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-[#1a2740] text-slate-300 border border-[#1a2740] px-4 py-2 rounded font-semibold text-sm
+           hover:bg-[#243352] transition-colors;
+  }
+
+  .btn-danger {
+    @apply bg-red-900/60 text-red-300 border border-red-700/40 px-4 py-2 rounded font-semibold text-sm
+           hover:bg-red-900 transition-colors;
+  }
+
+  .table-row {
+    @apply border-b border-mine-border hover:bg-mine-border/30 transition-colors;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-mine-muted text-sm
+           hover:bg-mine-border hover:text-mine-text transition-all cursor-pointer;
+  }
+
+  .sidebar-item.active {
+    @apply bg-mine-accent/10 text-mine-accent border-l-2 border-mine-accent;
+  }
+
+  /* Form fields */
+  .field-label {
+    @apply block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5;
+  }
+
+  .field-input {
+    @apply w-full bg-[#0d1520] border border-[#1a2740] rounded px-3 py-2 text-[13px]
+           text-slate-200 placeholder-slate-600
+           focus:border-amber-500/60 focus:outline-none focus:bg-[#0d1a2a]
+           transition-colors;
+  }
+
+  .field-input:is(select) {
+    @apply cursor-pointer;
+  }
+}
+
+/* Leaflet dark map overrides */
+.leaflet-container {
+  background: #0a0d14 !important;
+}
+
+.leaflet-tile {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7) !important;
+}
+
+/* Pulse animation for critical alarms */
+@keyframes pulse-critical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.alarm-critical { animation: pulse-critical 1s ease-in-out infinite; }
+
+/* Status dot */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
