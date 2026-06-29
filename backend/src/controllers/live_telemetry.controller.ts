@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { liveTelemetry, RealTrame } from '../services/telemetry/LiveTelemetryService';
 import { query } from '../config/database';
+import { liveTelemetrySchema } from '../schemas';
 
 /**
  * POST /api/v1/telemetry/live
@@ -23,13 +24,13 @@ import { query } from '../config/database';
  *   healthScore?   number   — score santé 0-100
  */
 export async function ingestLive(req: AuthRequest, res: Response): Promise<void> {
-  const body = req.body as Partial<RealTrame>;
-
-  // Validation basique
-  if (!body.fleetNumber || body.lat == null || body.lon == null) {
-    res.status(400).json({ error: 'fleetNumber, lat, lon requis' });
+  // Validation Zod — coordonnées, ranges, format fleetNumber
+  const parsed = liveTelemetrySchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Données invalides', details: parsed.error.flatten().fieldErrors });
     return;
   }
+  const body = parsed.data;
 
   // Enrichir l'equipmentId depuis la DB si absent
   let equipmentId = body.equipmentId;
@@ -42,16 +43,23 @@ export async function ingestLive(req: AuthRequest, res: Response): Promise<void>
     equipmentId = row?.equipment_id;
   }
 
+  // Vérification anti-spoofing : le fleetNumber doit exister dans la DB
+  // (sauf pour les admins qui peuvent tester n'importe quel numéro)
+  if (!equipmentId && req.user?.role !== 'ADMIN') {
+    res.status(403).json({ error: `Engin ${body.fleetNumber} non enregistré dans ce site` });
+    return;
+  }
+
   const trame: RealTrame = {
     fleetNumber:   body.fleetNumber,
-    lat:           Number(body.lat),
-    lon:           Number(body.lon),
-    speed_kmh:     Number(body.speed_kmh ?? 0),
-    heading:       Number(body.heading ?? 0),
-    payload_kg:    Number(body.payload_kg ?? 0),
-    fuelLevel_pct: Number(body.fuelLevel_pct ?? 100),
-    healthScore:   body.healthScore != null ? Number(body.healthScore) : undefined,
-    engineRunning: body.engineRunning !== false,
+    lat:           body.lat,
+    lon:           body.lon,
+    speed_kmh:     body.speed_kmh,
+    heading:       body.heading,
+    payload_kg:    body.payload_kg,
+    fuelLevel_pct: body.fuelLevel_pct,
+    healthScore:   body.healthScore,
+    engineRunning: body.engineRunning,
     timestamp:     body.timestamp ?? new Date().toISOString(),
     equipmentId,
   };

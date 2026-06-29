@@ -1,11 +1,13 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore, useRealtimeStore } from '../../store';
+import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import {
   IconDashboard, IconMap, IconTruck, IconProduction, IconDispatch,
   IconReports, IconSettings, IconLogout, IconAlert, IconSimulation, IconAI,
-  IconSpeed,
+  IconSpeed, IconGps,
 } from '../ui/Icons';
+import api from '../../lib/api';
 
 /**
  * Sidebar simplifiée : 8 entrées essentielles.
@@ -44,13 +46,32 @@ const NAV: (NavItem | NavSection)[] = [
   { type: 'section', label: 'Intelligence' },
   { to: '/ai-predictions', icon: IconAI,          label: 'IA & Prédictions' },
   { to: '/reports',        icon: IconReports,     label: 'Rapports' },
-  { to: '/integration',    icon: IconSettings,    label: 'Intégration GPS' },
+  { to: '/integration',    icon: IconGps,         label: 'Intégration GPS' },
 ];
 
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
   const { activeAlarms } = useRealtimeStore();
   const navigate = useNavigate();
+  const [liveCount, setLiveCount] = useState(0);
+
+  // Nombre d'engins GPS réels connectés — polling léger toutes les 10s
+  useEffect(() => {
+    const fetch = () =>
+      api.get('/telemetry/live/status').then(({ data }) => {
+        setLiveCount(data.liveCount ?? data.count ?? 0);
+      }).catch(() => {});
+    fetch();
+    const id = setInterval(fetch, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Injecter le badge live sur l'entrée Intégration GPS
+  const NAV_WITH_LIVE: typeof NAV = NAV.map(item =>
+    'to' in item && item.to === '/integration' && liveCount > 0
+      ? { ...item, badge: liveCount }
+      : item
+  );
 
   const criticalAlarms = activeAlarms.filter(
     a => a.severity === 'CRITICAL' || a.severity === 'EMERGENCY'
@@ -98,7 +119,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-2 overflow-y-auto">
-        {NAV.map((item, i) => {
+        {NAV_WITH_LIVE.map((item, i) => {
           if ('type' in item) {
             return (
               <div key={`sec-${i}`} className="px-3 pt-3 pb-1">
@@ -127,7 +148,12 @@ export default function Sidebar() {
                   <Icon size={13} className={isActive ? 'text-amber-400' : 'text-slate-500 group-hover:text-slate-300'} />
                   <span className="truncate font-medium">{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
-                    <span className="ml-auto text-[9px] bg-red-600 text-white rounded-full px-1.5 py-0.5 font-bold">
+                    <span className={clsx(
+                      'ml-auto text-[9px] rounded-full px-1.5 py-0.5 font-bold',
+                      item.to === '/integration'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-red-600 text-white'
+                    )}>
                       {item.badge}
                     </span>
                   )}

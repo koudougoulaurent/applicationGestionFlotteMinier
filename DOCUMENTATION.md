@@ -1,8 +1,8 @@
 # FMS Mining — Documentation Technique Complète
 ## Fleet Management System — Open Pit Mining
 
-> **Version** : 1.0.1 | **Dernière mise à jour** : 2026-06-24  
-> **Stack** : Node.js · TypeScript · PostgreSQL · React · Socket.io · Tailwind CSS
+> **Version** : 1.2.0 | **Dernière mise à jour** : 2026-06-29  
+> **Stack** : Node.js · TypeScript · PostgreSQL · React · Socket.io · Tailwind CSS · Three.js
 
 ---
 
@@ -18,10 +18,12 @@
 8. [Frontend — interface utilisateur](#8-frontend--interface-utilisateur)
 9. [Temps réel — Socket.io](#9-temps-réel--socketio)
 10. [Sécurité](#10-sécurité)
-11. [Passage simulation → terrain réel](#11-passage-simulation--terrain-réel)
-12. [Déploiement réseau LAN](#12-déploiement-réseau-lan)
-13. [Guide de mise à jour et évolution](#13-guide-de-mise-à-jour-et-évolution)
-14. [Glossaire minier](#14-glossaire-minier)
+11. [Mode Hybride sim+réel — GPS en production](#11-mode-hybride-simréel--gps-en-production)
+12. [IntegrationHub & DriverApp — intégration physique](#12-integrationhub--driverapp--intégration-physique)
+13. [Vue 3D Mine — fonctionnement technique](#13-vue-3d-mine--fonctionnement-technique)
+14. [Déploiement réseau LAN](#14-déploiement-réseau-lan)
+15. [Guide de mise à jour et évolution](#15-guide-de-mise-à-jour-et-évolution)
+16. [Glossaire minier](#16-glossaire-minier)
 
 ---
 
@@ -855,17 +857,29 @@ useEffect(() => {
 ### Couches de sécurité implémentées
 
 ```
-1. Transport        HTTPS obligatoire en production (Nginx reverse proxy)
-2. Authentification JWT RS256, durée 8h (= durée d'un poste de travail)
-3. MFA TOTP         Code 6 chiffres via Google Authenticator / Authy
-4. Autorisation     RBAC à 4 niveaux : ADMIN / DISPATCHER / VIEWER / OPERATOR
-5. Validation       Zod sur TOUS les corps de requête (types, longueurs, formats)
-6. Sanitisation     Suppression < > ' " ; -- avant tout traitement (XSS + SQLi)
-7. Rate limiting    100 requêtes / 15 min par IP (anti-brute-force)
-8. Headers HTTP     Helmet : X-Frame-Options DENY, CSP, HSTS, nosniff
-9. CORS             Whitelist explicite des IPs LAN autorisées
-10. SQL             Requêtes TOUJOURS paramétrées ($1, $2…) — jamais de concaténation
+1.  Transport        HTTPS obligatoire en production (Nginx reverse proxy)
+2.  Authentification JWT RS256, durée 8h (= durée d'un poste de travail)
+3.  MFA TOTP         Code 6 chiffres via Google Authenticator / Authy
+4.  Autorisation     RBAC à 4 niveaux : ADMIN / DISPATCHER / VIEWER / OPERATOR
+5.  Validation       Zod sur TOUS les corps de requête (types, longueurs, formats)
+6.  Sanitisation     Suppression < > ' " ; -- avant tout traitement (XSS + SQLi)
+7.  Rate limiting    3 niveaux : auth (20/15min), live GPS (720/min/IP:fleet), général (2000/15min)
+8.  Headers HTTP     Helmet : X-Frame-Options DENY, CSP, HSTS, noSniff
+9.  CORS             Whitelist explicite des IPs LAN autorisées
+10. SQL              Requêtes TOUJOURS paramétrées ($1, $2…) — jamais de concaténation
+11. Token URL        Token JWT jamais exposé en URL : déplacé en sessionStorage côté DriverApp
+12. Anti-spoofing    fleetNumber vérifié en DB avant d'accepter une trame (sauf rôle ADMIN)
+13. Géofence         Coordonnées GPS validées dans la zone mine ±0.5° (≈55km de rayon)
 ```
+
+### Rate limiting — 3 niveaux
+
+| Limiter | Route | Fenêtre | Max | Clé |
+|---|---|---|---|---|
+| `authLimiter` | `/auth/login`, `/auth/mfa/verify` | 15 min | 20 | IP |
+| `liveLimiter` | `/telemetry/live` | 1 min | 720 | IP:fleetNumber |
+| `simLimiter` | `/simulation/*` | 1 min | 300 | IP |
+| `apiLimiter` | `/api/*` (général) | 15 min | 2000 | IP |
 
 ### Flux d'authentification complet
 
@@ -895,50 +909,156 @@ openssl rand -hex 64
 
 ---
 
-## 11. Passage simulation → terrain réel
+## 11. Mode Hybride sim+réel — GPS en production
 
-### Pourquoi l'intégration est simple
+### Principe fondamental : continuité sans rupture
 
-L'architecture a été conçue dès le départ pour que **la simulation et le terrain utilisent exactement les mêmes endpoints API et les mêmes tables**. Le SimulationEngine est juste un "émetteur de données" qui peut être remplacé par du vrai matériel sans changer une ligne de code dans les controllers, les services IA, ou le frontend.
-
-### Schéma de remplacement
+Le mode hybride permet de **connecter les premiers engins physiques sans arrêter la simulation des autres**. Chaque engin réel prend le dessus sur son jumeau simulé ; ceux qui n'ont pas encore de GPS continuent de fonctionner en simulation. Il n'y a pas de "bascule" à une date précise — la transition est progressive, engin par engin.
 
 ```
-SIMULATION (phase actuelle)            TERRAIN RÉEL (phase production)
-───────────────────────────            ────────────────────────────────
-SimulationEngine.ts                    GPS embarqué (Trimble, Hemisphere...)
-    │                                          │
-    │ Émet des positions fictives              │ Émet les positions GPS réelles
-    ▼                                          ▼
-POST /api/v1/gps/positions ◄──────────────────┘
-POST /api/v1/telemetry/:id ◄────── PLC / SCADA (données moteur réelles)
-POST /api/v1/.../bnr       ◄────── Boîtier BNR physique (Modbus TCP)
-         │
-         ▼
-Backend Express (identique)
-         │
-         ├─ PostgreSQL (identique — mêmes tables)
-         ├─ Socket.io (identique — mêmes événements)
-         └─ Modules IA (identiques — mêmes algorithmes)
+┌─────────────────────────────────────────────────────────┐
+│                  /api/v1/simulation/status               │
+│                                                          │
+│  TK-001  [SIM]   → SimulationEngine (fictif)            │
+│  TK-002  [SIM]   → SimulationEngine (fictif)            │
+│  TK-007  [LIVE]  → LiveTelemetryService (GPS réel) ✓   │
+│  TK-008  [SIM]   → SimulationEngine (fictif)            │
+│  TK-012  [LIVE]  → LiveTelemetryService (GPS réel) ✓   │
+└─────────────────────────────────────────────────────────┘
+                         │
+              même format JSON pour les deux
+                         │
+                  frontend Mine3DView
+                    Badge ◌ SIM / ● LIVE
 ```
 
-### Endpoints à câbler sur l'équipement physique
+### Architecture — LiveTelemetryService
 
-#### GPS embarqué — toutes les 5 secondes
+```
+backend/src/services/telemetry/LiveTelemetryService.ts
+```
+
+Singleton en mémoire Node.js avec un Map `fleetNumber → LiveTruck` :
+
+```typescript
+interface LiveTruck {
+  fleetNumber:   string;
+  lat:           number;
+  lon:           number;
+  speed_kmh:     number;
+  heading:       number;
+  payload_kg:    number;
+  fuelLevel_pct: number;
+  phase:         string;  // inféré par machine à états
+  lastSeen_ms:   number;  // Date.now() — pour TTL 30s
+  equipmentId?:  string;
+  isReal:        true;
+}
+```
+
+**Purge automatique** : `setInterval(() => liveTelemetry.purgeStale(), 5 * 60_000)` retire les engins silencieux depuis plus de 30 secondes.
+
+### Inférence de phase par géofencing
+
+Au lieu de demander aux engins de déclarer leur activité (risque de mauvaise saisie), le service **déduit automatiquement la phase opérationnelle** à partir de la position GPS et de la charge :
+
+| Zone géofence | Charge | Mouvement | Phase inférée |
+|---|---|---|---|
+| PIT-* | Vide, statique | Non | QUEUING_AT_SOURCE |
+| PIT-* | Delta charge > 2t | — | LOADING |
+| PIT-* | Chargé, mobile | Oui | HAULING |
+| CRUSHER / DUMP | Chargé, statique | Non | QUEUING_AT_DEST |
+| CRUSHER / DUMP | Delta charge < -5t | — | DUMPING |
+| CRUSHER / DUMP | Vide | — | RETURNING |
+| FUEL_STATION | Tout | Tout | REFUELING |
+| PARKING | Tout | Statique | IDLE |
+| Hors zone | Chargé | Mobile | HAULING |
+| Hors zone | Vide | Mobile | RETURNING |
+
+**Paramètres des géofences (site Nchanga Open-Pit) :**
+
+| Code | Type | Coordonnées | Rayon |
+|---|---|---|---|
+| PIT-1 | PIT | -12.490, 27.840 | 350m |
+| PIT-2 | PIT | -12.500, 27.830 | 350m |
+| PIT-3 | PIT | -12.485, 27.860 | 350m |
+| CRUSH-1 | CRUSHER | -12.510, 27.855 | 200m |
+| DUMP-1 | DUMP | -12.525, 27.840 | 250m |
+| DUMP-2 | DUMP | -12.475, 27.870 | 250m |
+| STCK-1 | STOCKPILE | -12.515, 27.862 | 200m |
+| PARK-1 | PARKING | -12.505, 27.848 | 150m |
+| FUEL-1 | FUEL_STATION | -12.508, 27.842 | 100m |
+| SCALE-1 | SCALE | -12.507, 27.850 | 100m |
+
+### Endpoint d'ingestion
+
+```http
+POST /api/v1/telemetry/live
+Authorization: Bearer <JWT_utilisateur>
+Content-Type: application/json
+
+{
+  "fleetNumber":   "TK-007",
+  "lat":           -12.4923,
+  "lon":           27.8412,
+  "speed_kmh":     34.5,
+  "heading":       127,
+  "payload_kg":    195000,
+  "fuelLevel_pct": 68,
+  "engineRunning": true
+}
+```
+
+**Réponse :**
+```json
+{
+  "ok": true,
+  "fleetNumber": "TK-007",
+  "inferredPhase": "HAULING",
+  "isNew": false,
+  "ts": "2026-06-29T09:14:32.000Z"
+}
+```
+
+**Validations appliquées (Zod + backend) :**
+- `fleetNumber` : alphanumérique avec tirets, max 20 cars
+- `lat` / `lon` : restreints à la zone mine ±0.5° (≈ 55 km)
+- `speed_kmh` : 0–120 (CAT 793 max 67 km/h en descente)
+- `payload_kg` : 0–300 000 (CAT 793 max 227 t)
+- `fleetNumber` doit exister en DB (anti-spoofing, sauf ADMIN)
+
+**Rate limiting dédié :** 720 requêtes/min par paire `IP:fleetNumber` (≈ 50 engins × 1 trame/5s × 1.2 tolérance)
+
+### Endpoint de statut
+
+```http
+GET /api/v1/telemetry/live/status
+Authorization: Bearer <JWT>
+```
+
+```json
+{
+  "liveCount": 3,
+  "trucks": [
+    { "fleetNumber": "TK-007", "phase": "HAULING", "lastSeen_s": 3, "lat": -12.4923, "lon": 27.8412 },
+    { "fleetNumber": "TK-012", "phase": "LOADING", "lastSeen_s": 1, "lat": -12.490,  "lon": 27.840  },
+    { "fleetNumber": "TK-003", "phase": "IDLE",    "lastSeen_s": 8, "lat": -12.505,  "lon": 27.848  }
+  ]
+}
+```
+
+### Anciennes méthodes d'intégration (maintenues pour GPS boîtiers)
+
+#### GPS boîtier embarqué — toutes les 5 secondes (méthode classique)
 ```http
 POST /api/v1/gps/positions
 Authorization: Bearer <token_du_camion>
 Content-Type: application/json
-
 {
   "equipment_id": "uuid-du-camion",
-  "latitude": -12.5023,
-  "longitude": 27.8549,
-  "speed_kmh": 32.5,
-  "heading": 127,
-  "altitude_m": 1240,
-  "accuracy_m": 2.1,
-  "source": "GPS"
+  "latitude": -12.5023, "longitude": 27.8549,
+  "speed_kmh": 32.5, "heading": 127,
+  "altitude_m": 1240, "accuracy_m": 2.1, "source": "GPS"
 }
 ```
 
@@ -946,77 +1066,177 @@ Content-Type: application/json
 ```http
 POST /api/v1/telemetry/{equipment_id}
 Authorization: Bearer <token_du_camion>
-Content-Type: application/json
-
-{
-  "engine_temp_c": 87.3,
-  "engine_oil_pressure_bar": 4.2,
-  "engine_rpm": 1850,
-  "engine_hours": 12543.7,
-  "fuel_level_pct": 68.4,
-  "hydraulic_temp_c": 58.1,
-  "brake_temp_fl_c": 142.0,
-  "brake_temp_fr_c": 138.5,
-  "payload_tonnes": 195.3,
-  "voltage_v": 24.8
-}
+{ "engine_temp_c": 87.3, "engine_rpm": 1850, "fuel_level_pct": 68.4, ... }
 ```
 
-#### Capteurs BNR physiques — toutes les minutes
-```http
-POST /api/v1/simulation/sensors/bnr/generate
-Authorization: Bearer <token_admin>
-Content-Type: application/json
+> Pour Modbus TCP ou OPC-UA : script passerelle Python/Node.js qui lit le bus et poste à l'API. Moins de 80 lignes.
 
-{
-  "siteId": "uuid-du-site",
-  "stationCode": "BNR-N01",
-  "stability_index": 82.4,
-  "vibration_mms": 0.34,
-  "deformation_mm": 0.21,
-  "moisture_pct": 38.7,
-  "seismic_activity": 0.08
-}
-```
-
-> **Note** : Si vos capteurs communiquent en Modbus TCP ou OPC-UA, vous aurez besoin d'un script passerelle (Python ou Node.js) qui lit le bus industriel et envoie les données à l'API. Ce script tient en moins de 80 lignes.
-
-### Créer un compte technique pour chaque équipement
-
-```sql
--- Un compte OPERATOR par GPS embarqué (permissions minimales)
-INSERT INTO core.user_account (username, password_hash, role, site_id, first_name, last_name)
-VALUES (
-  'gps_cat001',
-  crypt('MotDePasseRobuste2024!', gen_salt('bf', 12)),
-  'OPERATOR',
-  'uuid-du-site',
-  'GPS', 'CAT-001'
-);
-
--- Ce compte peut UNIQUEMENT envoyer des positions et de la télémétrie
--- Il ne peut PAS modifier des équipements, créer des dispatches, etc.
-```
-
-### Checklist d'intégration terrain
+### Checklist d'intégration progressive
 
 ```
-□ Compte technique créé pour chaque GPS embarqué
-□ Token JWT récupéré et configuré dans chaque boîtier GPS
-□ Endpoint /gps/positions testé avec curl depuis le réseau camion
-□ Endpoint /telemetry testé depuis le PLC/SCADA
-□ ALLOWED_ORIGINS mis à jour avec l'IP du réseau OT
-□ Simulation arrêtée (Page Simulation → Arrêter)
-□ ENABLE_GPS_SIMULATION=false dans .env + redémarrage backend
-□ Premiers vrais GPS visibles sur la page /map
-□ Module maintenance prédictive : attendre 48h de vraies données
-□ Seuils BNR validés avec le géologue de site
-□ Sauvegardes automatiques configurées (voir Section 12)
+□ Phase 1 — Simulation seule (état initial)
+  □ Simulation démarrée sur la page /simulation
+  □ Tous les KPIs visibles en temps réel
+
+□ Phase 2 — Premiers engins physiques (mode hybride)
+  □ Compte utilisateur créé pour le chauffeur (OPERATOR)
+  □ Lien DriverApp généré dans IntegrationHub → onglet Chauffeurs
+  □ Lien ouvert sur le téléphone du chauffeur
+  □ Badge ● LIVE visible sur l'engin dans la vue 3D
+  □ Sidebar : badge vert sur "Intégration GPS"
+
+□ Phase 3 — Passage complet au terrain
+  □ Tous les engins connectés (DriverApp ou boîtier GPS)
+  □ Simulation arrêtée (Page Simulation → Arrêter)
+  □ ALLOWED_ORIGINS mis à jour avec l'IP réseau OT
+  □ Sauvegardes automatiques configurées (voir Section 14)
 ```
 
 ---
 
-## 12. Déploiement réseau LAN
+## 12. IntegrationHub & DriverApp — intégration physique
+
+### Vue d'ensemble
+
+L'intégration physique ne requiert **aucune installation matérielle initiale**. Un smartphone Android ou iOS dans la cabine du camion suffit pour démarrer la phase hybride. Le matériel spécialisé (boîtier GPS Teltonika, OBD-II...) peut être ajouté progressivement.
+
+```
+Chemin minimal : Téléphone chauffeur → navigateur → /driver → GPS navigateur → API FMS
+Chemin optimal : Boîtier GPS Teltonika FMB920 → SIM 4G → POST /telemetry/live → API FMS
+```
+
+### Page IntegrationHub (`/integration`)
+
+Accessible via la sidebar "Intégration GPS" (icône GPS, badge vert si des engins sont en direct). Rôles autorisés : **ADMIN**, **DISPATCHER**.
+
+#### Onglet 1 — Engins & statut
+
+Tableau de tous les engins du site avec :
+- **Badge ● LIVE / ◌ SIM** par engin
+- Dernière trame reçue (il y a Xs)
+- Coordonnées GPS actuelles
+- Bouton "Trame test" : envoie une trame fictive pour valider la connexion
+- Lien "Ouvrir l'app chauffeur" par engin
+
+#### Onglet 2 — App chauffeur
+
+Pour chaque camion :
+- **URL unique** à envoyer au chauffeur (format `/driver?truck=TK-007`)
+- Bouton copier (va dans le presse-papiers)
+- Bouton ouvrir dans un nouvel onglet (pour tester)
+
+**Guide de déploiement en 5 étapes affiché dans l'interface :**
+1. Copier le lien du camion
+2. Envoyer par WhatsApp/SMS au chauffeur
+3. Le chauffeur ouvre le lien dans Chrome
+4. Appuyer sur "Démarrer le tracking GPS"
+5. L'engin passe de ◌ SIM à ● LIVE dans la vue 3D
+
+#### Onglet 3 — Hardware
+
+Documentation technique pour les équipes IT :
+- Endpoint et format JSON complet
+- Configuration Teltonika FMB920 (codec, APN, période d'envoi)
+- Comparatif des 3 options matérielles (téléphone, OBD-II, boîtier GPS)
+- Exemple curl pour test depuis terminal
+
+### Page DriverApp (`/driver`)
+
+Route publique (pas de login requis) — accessible directement par le chauffeur.
+
+**Sécurité du token :**
+- Le JWT reçu en paramètre `?token=...` est immédiatement déplacé dans `sessionStorage` et l'URL est nettoyée (token retiré de l'historique navigateur et des logs serveur)
+- Le token n'apparaît jamais dans les logs Nginx ou Apache
+- Validité limitée à la session navigateur
+
+**Fonctionnalités :**
+
+| Fonctionnalité | Détail |
+|---|---|
+| **GPS précis** | `navigator.geolocation.watchPosition` — haute précision |
+| **Wake Lock** | Écran allumé en permanence (API Wake Lock) |
+| **Offline queue** | Trames accumulées hors réseau, renvoyées au retour 4G |
+| **Indicateur précision** | ±Xm — vert < 15m, orange < 50m, rouge > 50m |
+| **Charge / carburant** | Sliders mis à jour par le chauffeur |
+| **Phase affichée** | Retour visuel immédiat de l'activité détectée par le FMS |
+| **Sécurité visuelle** | "Données visibles uniquement par le dispatcher" |
+
+**Fréquence d'envoi :** 1 trame GPS toutes les 5 secondes.
+
+**URL de la page :** `http://[IP_SERVEUR]:5173/driver?truck=TK-007`  
+*(le token est ajouté automatiquement par IntegrationHub lors de la génération du lien)*
+
+---
+
+## 13. Vue 3D Mine — fonctionnement technique
+
+### Architecture du rendu (Mine3DView)
+
+```
+frontend/src/components/mining/Mine3DView.tsx
+```
+
+Rendu Three.js (WebGL) intégré dans une `<div>` React via `useRef`. La caméra est une `PerspectiveCamera` en vue isométrique inclinée, contrôlée par drag-souris.
+
+### Modèle 3D CAT 793 (procédural)
+
+Chaque engin est construit programmatiquement (pas de fichier .gltf) :
+
+```
+Groupe principal (groupe.userData.fleetNumber)
+├── Châssis (BoxGeometry)
+├── Moteur-capot (BoxGeometry)
+├── Cabine (BoxGeometry + fenêtres)
+├── Benne (bedPivot → BoxGeometry animable)
+├── 6 roues (CylinderGeometry × 6)
+├── Gyrophare (SphereGeometry + animation clignotant)
+├── Hitbox invisible (SphereGeometry r=0.12 — zone de clic)
+└── Anneau de sélection (RingGeometry — visible si sélectionné)
+```
+
+### Orientation heading
+
+Formule validée mathématiquement :
+```
+group.rotation.y = -(heading + 90) * π / 180
+```
+
+| Heading | Rotation Y | Direction |
+|---|---|---|
+| 0° (Nord) | -π/2 | ← Nord ✓ |
+| 90° (Est) | -π | ↑ Est ✓ |
+| 180° (Sud) | -3π/2 = π/2 | → Sud ✓ |
+| 270° (Ouest) | -2π = 0 | ↓ Ouest ✓ |
+
+### Séparation en voies (lane offset)
+
+Les camions circulant dans les deux sens sont décalés de 28m à droite de leur trajectoire :
+
+```typescript
+const H_rad = truck.heading * Math.PI / 180;
+const LANE  = 0.028; // 28m en unités scène (1 unit = 1 km)
+const laneX = Math.cos(H_rad) * LANE;
+const laneZ = Math.sin(H_rad) * LANE;
+```
+
+### Interaction (panneau d'action)
+
+**Raycasting récursif :** `raycaster.intersectObjects(groups, true)` — remonte au groupe parent via `userData.fleetNumber`.
+
+**Panneau d'action** : positionné en `position: absolute; right: 8; top: 8` — jamais de coordonnées écran (évite le gel après rotation caméra).
+
+**Sous-formulaires inline :**
+- `assign` → `POST /dispatch/manual-assign` (choix pelle + destination)
+- `message` → `POST /messages` (message texte + priorité)
+- `stop` → `POST /messages` (message URGENT "ARRÊT IMMÉDIAT")
+
+### Réseau routier
+
+Routes droites (`LineCurve3`) — largeur haul = 0.110, service = 0.075. Lignes blanches centrales sur les voies de transport. Réseau non-hub pour éviter les croisements parasites à PARK-1.
+
+---
+
+## 14. Déploiement réseau LAN
 
 ### Topologie recommandée
 
@@ -1116,7 +1336,7 @@ pm2 logs fms-mining-api --lines 50
 
 ---
 
-## 13. Guide de mise à jour et évolution
+## 15. Guide de mise à jour et évolution
 
 ### Ajouter un nouveau type de capteur physique
 
@@ -1205,7 +1425,7 @@ Mettre à jour la Section 12 en place
 
 ---
 
-## 14. Glossaire minier
+## 16. Glossaire minier
 
 | Terme | Définition dans le contexte FMS Mining |
 |---|---|
@@ -1235,7 +1455,39 @@ Mettre à jour la Section 12 en place
 
 ---
 
-## 15. Historique des corrections (Changelog)
+## 17. Historique des corrections (Changelog)
+
+### v1.2.0 — 2026-06-29 : Mode hybride GPS + sécurité + ergonomie 3D
+
+#### Nouvelles fonctionnalités
+- **LiveTelemetryService** : ingestion GPS temps réel avec inférence de phase par géofencing (10 zones, machine à états)
+- **Endpoint `/telemetry/live`** : endpoint unifié avec validation Zod + géofence + anti-spoofing
+- **IntegrationHub** (`/integration`) : interface d'intégration matérielle en 3 onglets (statut flotte, liens chauffeurs, hardware)
+- **DriverApp** (`/driver`) : application mobile chauffeur (GPS navigateur, Wake Lock, offline queue)
+- **Mode hybride** : `getSimStatus` fusionne engins réels (TTL 30s) et simulés — badge ● LIVE / ◌ SIM
+- **Sidebar badge** : compteur d'engins LIVE en temps réel sur l'entrée "Intégration GPS"
+
+#### Correctifs 3D (Mine3DView)
+- Heading corrigé (+90° au lieu de -90°) — trucks face maintenant le bon cap
+- Hitbox invisible (SphereGeometry r=0.12) — zone de clic ×8 plus grande
+- Panneau d'action fixe (top-right) — plus de gel après rotation caméra
+- Offset de voie (28m) — séparation aller/retour sur chaque route
+- Routes droites (LineCurve3) — suppression des croisements parasites à PARK-1
+
+#### Sécurité
+- Token JWT retiré de l'URL (DriverApp) — stocké en `sessionStorage`, URL nettoyée
+- Rate limiter dédié `/telemetry/live` (720/min par IP:fleetNumber)
+- Validation Zod complète du body live + vérification fleetNumber en DB
+- Restriction coordonnées GPS à la zone mine (±0.5°)
+
+#### Ergonomie
+- `IconGps` dans sidebar (remplace `IconSettings` ambigu)
+- Indicateur précision GPS (±Xm) dans DriverApp
+- Affichage phase avec icône + couleur dans DriverApp
+- File offline : trames accumulées offline renvoyées au retour réseau
+- Rate limit simulation : 300 req/min (polling haute fréquence OK)
+
+---
 
 ### v1.0.1 — 2026-06-24 : Correctifs modules 2, 3 et 5
 
@@ -1262,19 +1514,19 @@ Mettre à jour la Section 12 en place
 
 ## Compteurs du projet
 
-| Métrique | Valeur |
-|---|---|
-| Lignes SQL (schémas + migrations) | ~2 065 |
-| Lignes TypeScript backend | ~7 934 |
-| Lignes TypeScript frontend | ~8 127 |
-| **Total lignes de code** | **~18 126** |
-| Endpoints API REST | 98 |
-| Événements Socket.io | 12 |
-| Tables PostgreSQL | 34 |
-| Vues PostgreSQL | 8 |
-| Pages React | 16 |
-| Services backend | 7 |
-| Modules IA | 5 |
+| Métrique | v1.0.1 | v1.2.0 |
+|---|---|---|
+| Lignes SQL (schémas + migrations) | ~2 065 | ~2 065 |
+| Lignes TypeScript backend | ~7 934 | ~8 250 |
+| Lignes TypeScript frontend | ~8 127 | ~8 900 |
+| **Total lignes de code** | **~18 126** | **~19 215** |
+| Endpoints API REST | 98 | 100 |
+| Événements Socket.io | 12 | 12 |
+| Tables PostgreSQL | 34 | 34 |
+| Vues PostgreSQL | 8 | 8 |
+| Pages React | 16 | 18 |
+| Services backend | 7 | 8 |
+| Modules IA | 5 | 5 |
 
 ---
 

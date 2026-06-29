@@ -187,6 +187,27 @@ export const removeTyreSchema = z.object({
   removalReason: safeStr(200).optional(),
 });
 
+// ── Live GPS telemetry (mode hybride) ────────────────────────────────────────
+// Coordonnées contraintes à la région mine Nchanga + buffer 50km
+const MINE_LAT = -12.50, MINE_LON = 27.85, MAX_DIST_DEG = 0.5;
+export const liveTelemetrySchema = z.object({
+  fleetNumber:   z.string().min(1).max(20).regex(/^[A-Z0-9_-]+$/i, 'Format invalide'),
+  lat:           z.number()
+    .min(MINE_LAT - MAX_DIST_DEG, 'Latitude hors zone mine')
+    .max(MINE_LAT + MAX_DIST_DEG, 'Latitude hors zone mine'),
+  lon:           z.number()
+    .min(MINE_LON - MAX_DIST_DEG, 'Longitude hors zone mine')
+    .max(MINE_LON + MAX_DIST_DEG, 'Longitude hors zone mine'),
+  speed_kmh:     z.number().min(0).max(120).default(0),
+  heading:       z.number().min(0).max(360).default(0),
+  payload_kg:    z.number().min(0).max(300_000).default(0),
+  fuelLevel_pct: z.number().min(0).max(100).default(100),
+  healthScore:   z.number().min(0).max(100).optional(),
+  engineRunning: z.boolean().default(true),
+  timestamp:     z.string().datetime().optional(),
+  equipmentId:   z.string().uuid().optional(),
+});
+
 // ── Telemetry ─────────────────────────────────────────────────────────────────
 export const ingestTelemetrySchema = z.object({
   engineTemp:    z.number().min(-50).max(500).optional(),

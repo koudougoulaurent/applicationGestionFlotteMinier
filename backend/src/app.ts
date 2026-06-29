@@ -72,16 +72,31 @@ const apiLimiter = rateLimit({
 // Simulation polling endpoints have higher limit — legitimate high-frequency polling
 const simLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 min window
-  max: 300,            // 300 req/min = 5 req/s, largement suffisant
+  max: 300,            // 300 req/min = 5 req/s
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Rate limit exceeded. Slow down.' },
 });
 
-app.use('/api/v1/auth/login',      authLimiter);
-app.use('/api/v1/auth/mfa/verify', authLimiter);
-app.use('/api/v1/simulation',      simLimiter);  // route spécifique avant le limiter général
-app.use('/api',                    apiLimiter);
+// Live telemetry (GPS trames depuis engins réels) — 1 trame/5s × 50 engins = 600/min max
+const liveLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 720,            // tolérance 20% sur 50 engins à 5s/trame
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Live telemetry rate limit exceeded.' },
+  keyGenerator: (req) => {
+    // Rate-limit par IP + fleetNumber pour bloquer le spam d'un seul engin
+    const body = req.body as { fleetNumber?: string };
+    return `${req.ip}:${body?.fleetNumber ?? 'unknown'}`;
+  },
+});
+
+app.use('/api/v1/auth/login',         authLimiter);
+app.use('/api/v1/auth/mfa/verify',    authLimiter);
+app.use('/api/v1/telemetry/live',     liveLimiter); // avant le limiter général
+app.use('/api/v1/simulation',         simLimiter);
+app.use('/api',                       apiLimiter);
 
 // ── Body parsing ──────────────────────────────────────────────────────────────
 app.use(compression());
