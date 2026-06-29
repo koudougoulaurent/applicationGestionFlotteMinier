@@ -8,6 +8,7 @@ import { Request, Response } from 'express';
 import { simulationEngine } from '../services/simulation/SimulationEngine';
 import { bnrSensor } from '../services/sensors/BNRSensor';
 import { query } from '../config/database';
+import { liveTelemetry } from '../services/telemetry/LiveTelemetryService';
 
 type AuthRequest = Request & { user?: { userId: string; siteId: string; role: string } };
 
@@ -84,9 +85,46 @@ export async function setSimSpeed(req: Request, res: Response): Promise<void> {
 /**
  * GET /api/v1/simulation/status
  * Retourne l'état courant de la simulation (statut + tous les camions).
+ *
+ * Mode hybride : les engins réels (liveTelemetry) prennent le dessus
+ * sur leur jumeau simulé. Les engins sans signal réel restent simulés.
+ * Chaque engin porte un flag isReal:true/false.
  */
 export async function getSimStatus(_req: Request, res: Response): Promise<void> {
-  res.json(simulationEngine.getStatus());
+  const simStatus = simulationEngine.getStatus();
+  const liveSet   = liveTelemetry.getLiveFleetNumbers();
+
+  if (liveSet.size === 0) {
+    // Aucun engin réel → réponse simulation pure, marquer isReal: false
+    res.json({
+      ...simStatus,
+      trucks: simStatus.trucks.map(t => ({ ...t, isReal: false })),
+      liveCount: 0,
+    });
+    return;
+  }
+
+  // Merger : remplacer les camions simulés par leurs jumeaux réels
+  const mergedTrucks = simStatus.trucks.map(t => {
+    if (!liveSet.has(t.fleetNumber)) return { ...t, isReal: false };
+    const live = liveTelemetry.serialize(t.fleetNumber);
+    return live ?? { ...t, isReal: false };
+  });
+
+  // Ajouter les engins réels qui ne sont pas dans la simulation (nouveaux engins)
+  liveSet.forEach(fn => {
+    const alreadyIn = mergedTrucks.some(t => t.fleetNumber === fn);
+    if (!alreadyIn) {
+      const live = liveTelemetry.serialize(fn);
+      if (live) mergedTrucks.push(live);
+    }
+  });
+
+  res.json({
+    ...simStatus,
+    trucks:    mergedTrucks,
+    liveCount: liveSet.size,
+  });
 }
 
 // ── Scénarios ─────────────────────────────────────────────────────────────────

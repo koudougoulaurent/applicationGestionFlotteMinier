@@ -15,6 +15,7 @@ import { listOperators, getOperatorStats, createOperator, updateOperator, deacti
 import { listTyres, getTyresByEquipment, getTyreHistory, createTyre, installTyre, removeTyre, getTyreSummary } from '../controllers/tyre.controller';
 import { listShifts, getCurrentShift, createShift, closeShift, getShiftReport, assignOperatorToShift } from '../controllers/shift.controller';
 import { getLatestTelemetry, getTelemetryHistory, ingestTelemetry, getFleetTelemetrySummary, getWeather, recordWeather } from '../controllers/telemetry.controller';
+import { ingestLive, getLiveStatus } from '../controllers/live_telemetry.controller';
 import { getDailyReconciliation, getShiftReconciliation, getMaterialBreakdown, getTruckPerformance, upsertProductionPlan, listRoadConditions, recordRoadCondition, clearRoadCondition, listMaterials } from '../controllers/production.controller';
 import {
   startSimulation, stopSimulation, pauseSimulation, resumeSimulation,
@@ -156,6 +157,11 @@ router.get('/telemetry/:equipmentId',          authenticate, getLatestTelemetry)
 router.get('/telemetry/:equipmentId/history',  authenticate, getTelemetryHistory);
 router.get('/weather',                         authenticate, getWeather);
 router.post('/telemetry/:equipmentId',         authenticate, authorize(...ADMIN), validateBody(schemas.ingestTelemetrySchema), ingestTelemetry);
+
+// ── Mode hybride : ingestion télémétrie GPS temps réel ────────────────────────
+// Accessible par tout utilisateur authentifié (y compris app chauffeur)
+router.post('/telemetry/live',        authenticate, ingestLive);
+router.get ('/telemetry/live/status', authenticate, getLiveStatus);
 router.post('/weather',                        authenticate, authorize(...ADMIN), validateBody(schemas.recordWeatherSchema), recordWeather);
 
 // ── Référentiels ──────────────────────────────────────────────────────────────

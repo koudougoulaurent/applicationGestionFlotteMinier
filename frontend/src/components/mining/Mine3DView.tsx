@@ -54,6 +54,8 @@ export interface TruckData {
   phaseProgress: number;
   cyclesThisShift: number;
   tonnesThisShift: number;
+  isReal?:       boolean;   // true = GPS physique, false/undefined = simulé
+  lastSeen_s?:   number;    // secondes depuis dernière trame réelle
 }
 
 export interface TruckAction {
@@ -707,13 +709,14 @@ export default function Mine3DView({
         }
       });
 
-      // Label style
+      // Label style — badge LIVE (vert) ou SIM (gris)
       const lbl = labelMap.current.get(truck.fleetNumber);
       if (lbl) {
-        lbl.textContent = `${truck.fleetNumber} · ${truck.speed_kmh}km/h`;
-        lbl.style.borderColor = isSelected ? '#f59e0b' : '#334155';
-        lbl.style.color        = isSelected ? '#f59e0b' : '#e2e8f0';
-        lbl.style.background   = isSelected ? 'rgba(30,20,0,0.96)' : 'rgba(10,22,40,0.92)';
+        const badge = truck.isReal ? '● LIVE' : '◌ SIM';
+        lbl.textContent = `${truck.fleetNumber} · ${truck.speed_kmh}km/h  ${badge}`;
+        lbl.style.borderColor = isSelected ? '#f59e0b' : (truck.isReal ? '#22c55e' : '#334155');
+        lbl.style.color        = isSelected ? '#f59e0b' : (truck.isReal ? '#86efac' : '#e2e8f0');
+        lbl.style.background   = isSelected ? 'rgba(30,20,0,0.96)' : (truck.isReal ? 'rgba(5,25,10,0.95)' : 'rgba(10,22,40,0.92)');
         lbl.style.fontSize     = isSelected ? '10px' : '9px';
       }
 
@@ -946,12 +949,21 @@ export default function Mine3DView({
             {/* En-tête */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
-                  {actionPanel.fleetNumber}
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+                    {actionPanel.fleetNumber}
+                  </div>
+                  {actionPanel.truck.isReal
+                    ? <span style={{ fontSize:8, fontWeight:800, color:'#22c55e', background:'rgba(34,197,94,0.12)', border:'1px solid rgba(34,197,94,0.3)', borderRadius:3, padding:'1px 5px', letterSpacing:'0.08em' }}>LIVE</span>
+                    : <span style={{ fontSize:8, fontWeight:700, color:'#64748b', background:'rgba(100,116,139,0.1)', border:'1px solid rgba(100,116,139,0.2)', borderRadius:3, padding:'1px 5px', letterSpacing:'0.08em' }}>SIM</span>
+                  }
                 </div>
-                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
                   <span style={{ display:'inline-block', width:7, height:7, borderRadius:'50%', background:'#' + (PHASE_HEX[actionPanel.truck.phase] ?? 0x888888).toString(16).padStart(6,'0'), marginRight:4, verticalAlign:'middle' }} />
                   {PHASE_FR[actionPanel.truck.phase] ?? actionPanel.truck.phase}
+                  {actionPanel.truck.isReal && actionPanel.truck.lastSeen_s != null &&
+                    <span style={{ marginLeft:6, color:'#475569' }}>· mis à jour {actionPanel.truck.lastSeen_s}s</span>
+                  }
                 </div>
               </div>
               <button
@@ -1100,16 +1112,22 @@ export default function Mine3DView({
       </div>
 
       {/* ── Indicateurs top-right ──────────────────────────────────────── */}
-      <div style={{ position:'absolute', top:8, right:8, display:'flex', flexDirection:'column', gap:4, pointerEvents:'none' }}>
+      <div style={{ position:'absolute', top:8, right:actionPanel ? 212 : 8, display:'flex', flexDirection:'column', gap:4, pointerEvents:'none' }}>
         <div style={{ fontSize:8, color:'#475569', fontFamily:'monospace', background:'rgba(10,22,40,0.78)', padding:'3px 6px', borderRadius:3 }}>
           ⟳ Drag · ⊕ Zoom · ↖ Clic · ↗↗ Follow
         </div>
         {isRunning && (
           <div style={{ fontSize:9, color:'#22c55e', fontFamily:'monospace', background:'rgba(10,22,40,0.85)', padding:'3px 6px', borderRadius:3, border:'1px solid rgba(34,197,94,0.2)', display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ width:6, height:6, borderRadius:'50%', background:'#22c55e', animation:'pulse 1s infinite', display:'inline-block' }} />
-            {trucks.filter(t => t.phase !== 'DOWN').length} engins actifs
+            <span style={{ width:6, height:6, borderRadius:'50%', background:'#22c55e', display:'inline-block' }} />
+            {trucks.filter(t => t.phase !== 'DOWN').length} actifs
           </div>
         )}
+        {(() => { const live = trucks.filter(t => t.isReal).length; return live > 0 ? (
+          <div style={{ fontSize:9, color:'#86efac', fontFamily:'monospace', background:'rgba(5,25,10,0.92)', padding:'3px 6px', borderRadius:3, border:'1px solid rgba(34,197,94,0.35)', display:'flex', alignItems:'center', gap:4 }}>
+            <span style={{ width:6, height:6, borderRadius:'50%', background:'#22c55e', display:'inline-block', boxShadow:'0 0 4px #22c55e' }} />
+            {live} GPS réel
+          </div>
+        ) : null; })()}
       </div>
     </div>
   );
