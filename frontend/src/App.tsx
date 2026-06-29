@@ -25,6 +25,8 @@ import SpeedMonitor      from './pages/SpeedMonitor';
 import ShiftReportPage   from './pages/ShiftReportPage';
 import TKPHDashboard     from './pages/TKPHDashboard';
 import DispatchConsole   from './pages/DispatchConsole';
+import IntegrationHub   from './pages/IntegrationHub';
+import DriverApp        from './pages/DriverApp';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -35,7 +37,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<Login />} />
+        <Route path="/login"  element={<Login />} />
+        <Route path="/driver" element={<DriverApp />} />
         <Route
           path="/"
           element={
@@ -72,6 +75,7 @@ export default function App() {
           <Route path="shift-reports"     element={<ShiftReportPage />} />
           <Route path="tyres-tkph"        element={<TKPHDashboard />} />
           <Route path="dispatch-console"  element={<DispatchConsole />} />
+          <Route path="integration"       element={<IntegrationHub />} />
           <Route path="settings"          element={<Settings />} />
         </Route>
       </Routes>

@@ -44,6 +44,7 @@ const NAV: (NavItem | NavSection)[] = [
   { type: 'section', label: 'Intelligence' },
   { to: '/ai-predictions', icon: IconAI,          label: 'IA & Prédictions' },
   { to: '/reports',        icon: IconReports,     label: 'Rapports' },
+  { to: '/integration',    icon: IconSettings,    label: 'Intégration GPS' },
 ];
 
 export default function Sidebar() {
