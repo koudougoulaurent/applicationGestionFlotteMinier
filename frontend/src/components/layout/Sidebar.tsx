@@ -16,7 +16,7 @@ import api from '../../lib/api';
  * Sections :
  *  Contrôle   → Command Center, Carte Mine, Simulation
  *  Opérations → Flotte, Production, Sécurité
- *  Intelligence→ IA & Dispatch, Rapports
+ *  Analyse → Optimisation, Rapports
  */
 
 interface NavItem {
@@ -43,8 +43,8 @@ const NAV: (NavItem | NavSection)[] = [
   { to: '/production',       icon: IconProduction,  label: 'Production' },
   { to: '/speed',            icon: IconSpeed,       label: 'Sécurité' },
 
-  { type: 'section', label: 'Intelligence' },
-  { to: '/ai-predictions', icon: IconAI,          label: 'IA & Prédictions' },
+  { type: 'section', label: 'Analyse' },
+  { to: '/ai-predictions', icon: IconAI,          label: 'Optimisation' },
   { to: '/reports',        icon: IconReports,     label: 'Rapports' },
   { to: '/integration',    icon: IconGps,         label: 'Intégration GPS' },
 ];

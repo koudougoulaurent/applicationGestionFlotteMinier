@@ -1,28 +1,14 @@
 /**
- * AIPredictions.tsx — Module IA : Route + Dispatch + Maintenance prédictive
- * =========================================================================
- * Tableau de bord unifié pour les 3 modules d'intelligence artificielle :
- *
- *   Module 2 : Optimisation des routes (algorithme de Dijkstra)
- *              → Trouve le chemin optimal entre deux points en tenant compte
- *                de la pente, de l'état de la route et de la congestion.
- *
- *   Module 3 : Dispatch intelligent (algorithme hongrois / Munkres)
- *              → Affecte de manière optimale chaque camion disponible
- *                à la pelle la moins chargée, minimisant le temps d'attente total.
- *
- *   Module 4 : Maintenance prédictive (scoring ML)
- *              → Calcule un score de santé 0-100 pour chaque équipement,
- *                estime le Remaining Useful Life (RUL) et la probabilité
- *                de panne dans les 24h/72h/7 jours.
- * =========================================================================
+ * AIPredictions.tsx — Analyse & Optimisation de flotte
+ * =====================================================
+ * Tableau de bord unifié : optimisation de routes, dispatch et maintenance.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import apiDefault, { aiApi } from '../lib/api';
 import { useAuthStore } from '../store';
 import {
-  IconAI, IconWrench, IconDispatch, IconRoads, IconRefresh,
+  IconWrench, IconDispatch, IconRoads, IconRefresh,
   IconAlert, IconCheck, IconActivity, IconChevronDown, IconTruck,
 } from '../components/ui/Icons';
 
@@ -247,9 +233,9 @@ export default function AIPredictions() {
   // ── Rendu ──────────────────────────────────────────────────
 
   const tabs = [
-    { key: 'overview',    label: "Vue d'ensemble", icon: IconAI },
+    { key: 'overview',    label: "Vue d'ensemble", icon: IconActivity },
     { key: 'routes',      label: 'Optimisation routes', icon: IconRoads },
-    { key: 'dispatch',    label: 'Dispatch IA', icon: IconDispatch },
+    { key: 'dispatch',    label: 'Dispatch', icon: IconDispatch },
     { key: 'maintenance', label: 'Maintenance prédictive', icon: IconWrench },
   ] as const;
 
@@ -260,11 +246,11 @@ export default function AIPredictions() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-white flex items-center gap-2">
-            <IconAI size={18} className="text-purple-400" />
-            Intelligence Artificielle
+            <IconActivity size={18} className="text-purple-400" />
+            Analyse & Optimisation
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Modules 2, 3 & 4 — Optimisation, Dispatch et Maintenance prédictive
+            Optimisation de routes · Dispatch · Maintenance prédictive
           </p>
         </div>
         <button onClick={loadDashboard}
@@ -326,7 +312,7 @@ export default function AIPredictions() {
 // ── Onglet Vue d'ensemble ─────────────────────────────────────────────────────
 
 function OverviewTab({ dashboard, loading }: { dashboard: AIDashboard | null; loading: boolean }) {
-  if (loading) return <LoadingSpinner label="Chargement du tableau de bord IA…" />;
+  if (loading) return <LoadingSpinner label="Chargement du tableau de bord…" />;
   if (!dashboard) return <EmptyState message="Impossible de charger le tableau de bord" />;
 
   return (
@@ -406,29 +392,28 @@ function OverviewTab({ dashboard, loading }: { dashboard: AIDashboard | null; lo
         )}
       </div>
 
-      {/* Explication pédagogique */}
-      <div className="md:col-span-3 bg-purple-950/20 border border-purple-700/30 rounded p-4">
-        <h3 className="text-sm font-semibold text-purple-300 mb-2 flex items-center gap-2">
-          <IconAI size={14} />Comment fonctionne chaque module ?
+      {/* Explication des modules */}
+      <div className="md:col-span-3 bg-[#0d1520] border border-[#1a2740] rounded p-4">
+        <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+          <IconActivity size={14} className="text-purple-400" />Fonctionnement des modules
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-400">
           <div>
-            <div className="text-blue-400 font-medium mb-1">Module 2 — Optimisation de route</div>
-            <p>L'algorithme de <strong className="text-slate-300">Dijkstra</strong> parcourt le graphe des pistes minières
-               et trouve le chemin de coût minimal. Chaque arête est pondérée par la distance, la pente
-               (+15% par degré chargé), l'état de la route (×1.2 pour FAIR, ×1.6 pour POOR) et la congestion.</p>
+            <div className="text-blue-400 font-semibold mb-1">Optimisation de route</div>
+            <p>Calcule le chemin de coût minimal entre deux points du site.
+               Chaque segment est pondéré par la distance, la pente, l'état de la piste
+               et le niveau de congestion actuel.</p>
           </div>
           <div>
-            <div className="text-emerald-400 font-medium mb-1">Module 3 — Dispatch intelligent</div>
-            <p>L'<strong className="text-slate-300">algorithme hongrois (Munkres)</strong> résout un problème d'affectation
-               optimale : chaque camion disponible reçoit la pelle qui minimise son temps d'attente total.
-               La matrice de coût combine distance, file d'attente, santé et niveau carburant.</p>
+            <div className="text-emerald-400 font-semibold mb-1">Dispatch optimisé</div>
+            <p>Affecte chaque camion disponible à la pelle qui minimise le temps d'attente global.
+               La matrice de coût intègre la distance, la file d'attente, la santé de l'engin
+               et son niveau de carburant.</p>
           </div>
           <div>
-            <div className="text-orange-400 font-medium mb-1">Module 4 — Maintenance prédictive</div>
-            <p>Un <strong className="text-slate-300">modèle ML hybride</strong> analyse 24h de télémétrie. Il calcule un score
-               de santé pondéré (moteur 40%, hydraulique 25%, freins 15%…), estime le Remaining Useful Life
-               et la probabilité de panne via une fonction logistique.</p>
+            <div className="text-orange-400 font-semibold mb-1">Maintenance prédictive</div>
+            <p>Analyse 24h de télémétrie pour calculer un score de santé 0–100 par équipement,
+               estimer la durée de vie utile restante et la probabilité de panne à 24h, 72h et 7 jours.</p>
           </div>
         </div>
       </div>
@@ -500,15 +485,13 @@ function RoutesTab({
             disabled={loading || !originId || !destId}
             className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-semibold text-white transition-colors"
           >
-            {loading ? 'Calcul en cours (Dijkstra)…' : 'Calculer la route'}
+            {loading ? 'Calcul en cours…' : 'Calculer la route'}
           </button>
         </div>
 
-        {/* Explication Dijkstra */}
-        <div className="mt-4 p-3 bg-blue-950/30 border border-blue-700/30 rounded text-xs text-slate-400">
-          <strong className="text-blue-400">Algorithme de Dijkstra :</strong>{' '}
-          Explore les nœuds par coût croissant via une file de priorité.
-          Garantit le chemin de coût minimal dans un graphe sans arêtes négatives.
+        <div className="mt-4 p-3 bg-blue-950/20 border border-blue-700/20 rounded text-xs text-slate-500">
+          Le moteur calcule le chemin de coût minimal en tenant compte de la pente
+          (+15% par degré pour camion chargé), de l'état de la piste et de la congestion en temps réel.
         </div>
       </div>
 
@@ -518,7 +501,7 @@ function RoutesTab({
         {!result && !loading && (
           <EmptyState message="Lancez le calcul pour voir la route optimale" />
         )}
-        {loading && <LoadingSpinner label="Calcul Dijkstra…" />}
+        {loading && <LoadingSpinner label="Calcul en cours…" />}
         {result && (
           <div className="space-y-4">
             {/* Route principale */}
@@ -593,7 +576,7 @@ function DispatchTab({ result, loading, applyLoading, applyMsg, onOptimize, onAp
           className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded text-sm font-semibold text-white transition-colors"
         >
           <IconDispatch size={14} />
-          {loading ? 'Calcul (algorithme hongrois)…' : 'Optimiser le dispatch'}
+          {loading ? 'Optimisation en cours…' : 'Optimiser le dispatch'}
         </button>
         {result && !applyMsg && (
           <button
@@ -612,15 +595,14 @@ function DispatchTab({ result, loading, applyLoading, applyMsg, onOptimize, onAp
         )}
       </div>
 
-      {loading && <LoadingSpinner label="Algorithme hongrois en cours — matrice de coût…" />}
+      {loading && <LoadingSpinner label="Optimisation des affectations…" />}
 
       {!result && !loading && (
         <div className="bg-[#0d1520] border border-[#1a2740] rounded p-8">
           <EmptyState message="Cliquez sur 'Optimiser le dispatch' pour calculer les affectations optimales" />
-          <div className="mt-4 p-3 bg-emerald-950/30 border border-emerald-700/30 rounded text-xs text-slate-400">
-            <strong className="text-emerald-400">Algorithme hongrois :</strong>{' '}
-            Résout le problème d'affectation optimale en O(n³) — garantit le minimum de coût total
-            pour n camions → n pelles, même si n = 15.
+          <div className="mt-4 p-3 bg-emerald-950/20 border border-emerald-700/20 rounded text-xs text-slate-500">
+            Le moteur d'affectation garantit le minimum de coût total pour l'ensemble de la flotte
+            en combinant distance, file d'attente, santé de l'engin et niveau de carburant.
           </div>
         </div>
       )}
