@@ -1,164 +1,103 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api';
-import type { Zone, Dump, Engin, Voyage } from '../types';
-import VoyageModal from './VoyageModal';
+import { T, MINERAL, DUMP_TYPE } from '../constants';
+import type { Zone } from '../types';
 
 interface Props {
   zone: Zone;
-  allDumps: Dump[];
-  onRefresh: () => void;
+  onDispatch: () => void;
 }
 
-const COLORS: Record<string, string> = {
-  blue:   'border-blue-600/40 bg-blue-950/20',
-  slate:  'border-slate-600/40 bg-slate-900/30',
-  amber:  'border-amber-600/40 bg-amber-950/20',
-  green:  'border-green-600/40 bg-green-950/20',
-  red:    'border-red-600/40 bg-red-950/20',
-};
-const ACCENT: Record<string, string> = {
-  blue: 'text-blue-400',  slate: 'text-slate-300',
-  amber: 'text-amber-400', green: 'text-green-400', red: 'text-red-400',
-};
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${T.border}`, fontSize: 11 }}>
+      <span style={{ color: T.faint, fontSize: 10, width: 88, flexShrink: 0, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</span>
+      <span style={{ flex: 1 }}>{children}</span>
+    </div>
+  );
+}
 
-export default function ZoneCard({ zone, allDumps, onRefresh }: Props) {
-  const [engins,  setEngins]  = useState<Engin[]>([]);
-  const [actifs,  setActifs]  = useState<Voyage[]>([]);
-  const [modal,   setModal]   = useState(false);
-  const [open,    setOpen]    = useState(true);
-
-  const couleur = zone.couleur ?? 'blue';
-  const cardCls = COLORS[couleur] ?? COLORS.blue;
-  const accCls  = ACCENT[couleur] ?? ACCENT.blue;
-
-  const load = async () => {
-    const [e, v] = await Promise.all([
-      api.engins(zone.id),
-      api.voyages({ zone_id: String(zone.id), statut: 'EN_COURS', limit: '20' }),
-    ]);
-    setEngins(e);
-    setActifs(v);
-  };
-
-  useEffect(() => { load(); }, [zone.id]);
-
-  const terminer = async (voyageId: number) => {
-    await api.terminer(voyageId);
-    load(); onRefresh();
-  };
-
-  const enRoute  = engins.filter(e => e.statut_voyage === 'EN_COURS').length;
-  const dispos   = engins.filter(e => !e.statut_voyage).length;
+export default function ZoneCard({ zone, onDispatch }: Props) {
+  const min    = MINERAL[zone.type_minerai] ?? { label: zone.type_minerai, color: T.sub };
+  const active = zone.pelle_statut === 'ACTIVE';
+  const luColor = zone.pelle_code ? (active ? '#22c55e' : '#ef4444') : T.faint;
 
   return (
-    <>
-      <div className={`border rounded-xl overflow-hidden ${cardCls}`}>
+    <div style={{ border: `1px solid ${T.border}`, borderRadius: 8, overflow: 'hidden' }}>
 
-        {/* ── Header zone ── */}
-        <div
-          className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
-          onClick={() => setOpen(o => !o)}
-        >
-          <div className="flex items-center gap-3">
-            <div className={`text-lg font-black font-mono ${accCls}`}>{zone.code}</div>
-            <div>
-              <div className="text-sm font-semibold text-white">{zone.nom}</div>
-              {zone.materiau && <div className="text-xs text-slate-500">{zone.materiau}</div>}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Compteurs */}
-            <div className="flex gap-2">
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">
-                {dispos} DISPO
-              </span>
-              {enRoute > 0 && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/60 text-blue-300">
-                  {enRoute} EN ROUTE
-                </span>
-              )}
-            </div>
-            <span className="text-slate-600 text-xs">{open ? '▲' : '▼'}</span>
-          </div>
+      {/* ── LU — entité principale ── */}
+      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, background: `${luColor}08` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: T.amber, letterSpacing: 1 }}>LU</span>
+          <span style={{ color: luColor }}>●</span>
+          {zone.pelle_code ? (
+            <span style={{ fontSize: 17, fontWeight: 700, color: T.text, fontFamily: 'monospace', letterSpacing: 1 }}>{zone.pelle_code}</span>
+          ) : (
+            <span style={{ fontSize: 13, color: T.faint, fontStyle: 'italic' }}>pelle non assignée</span>
+          )}
+          {zone.pelle_statut && zone.pelle_statut !== 'ACTIVE' && (
+            <span style={{ fontSize: 9, color: '#ef4444', marginLeft: 4 }}>({zone.pelle_statut.replace(/_/g, ' ')})</span>
+          )}
         </div>
-
-        {open && (
-          <div className="px-4 pb-4 space-y-3">
-
-            {/* ── Ligne visuelle : zone → camions en route → dumps ── */}
-            {actifs.length > 0 && (
-              <div className="space-y-1.5">
-                {actifs.map(v => (
-                  <div key={v.id} className="flex items-center gap-2 bg-black/20 rounded-lg px-3 py-2">
-                    <span className="text-base">🚛</span>
-                    <span className="text-xs font-mono text-slate-300 w-16 shrink-0">{v.engin}</span>
-                    {/* ligne pointillée */}
-                    <div className="flex-1 flex items-center gap-0.5 overflow-hidden">
-                      {Array.from({ length: 12 }).map((_, i) => (
-                        <div key={i} className="h-px w-2 bg-blue-700/60 shrink-0" />
-                      ))}
-                    </div>
-                    <span className="text-[10px] font-bold text-slate-400 shrink-0">{v.dump_code}</span>
-                    <span className="text-[10px] text-slate-600 shrink-0">
-                      {new Date(v.heure_depart).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <button
-                      onClick={() => terminer(v.id)}
-                      className="text-[9px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 hover:bg-green-800/60 shrink-0"
-                    >
-                      ✓ Arrivé
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── Liste engins ── */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-              {engins.map(e => (
-                <div key={e.id}
-                  className="flex items-center gap-1.5 bg-black/20 rounded px-2 py-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${e.statut_voyage ? 'bg-blue-400' : 'bg-emerald-400'}`} />
-                  <span className="text-xs font-mono text-slate-300">{e.numero}</span>
-                  <span className="text-[10px] text-slate-600 ml-auto">{e.capacite_t}t</span>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Dumps de cette zone ── */}
-            <div className="flex flex-wrap gap-1.5 items-center">
-              <span className="text-[10px] text-slate-600 uppercase tracking-wider">Dumps →</span>
-              {zone.dumps.map(d => (
-                <span key={d.id}
-                  className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-                  {d.code}
-                </span>
-              ))}
-              {zone.dumps.length === 0 && (
-                <span className="text-[10px] text-slate-600 italic">Aucun dump lié</span>
-              )}
-            </div>
-
-            {/* ── Bouton ajouter voyage ── */}
-            <button
-              onClick={() => setModal(true)}
-              className="w-full py-2 mt-1 border border-dashed border-blue-700/50 rounded-lg text-xs font-semibold text-blue-400 hover:bg-blue-950/30 hover:border-blue-500 transition-colors"
-            >
-              + Ajouter un voyage depuis {zone.code}
-            </button>
-
+        {zone.pelle_code && (
+          <div style={{ display: 'flex', gap: 10, fontSize: 10, color: T.sub, paddingLeft: 34 }}>
+            <span>{zone.pelle_modele}</span>
+            {zone.pelle_operateur && <span style={{ color: T.faint }}>· {zone.pelle_operateur}</span>}
           </div>
         )}
       </div>
 
-      {modal && (
-        <VoyageModal
-          zone={zone}
-          allDumps={allDumps}
-          onClose={() => setModal(false)}
-          onSaved={() => { setModal(false); load(); onRefresh(); }}
-        />
-      )}
-    </>
+      {/* ── Attributs de la zone ── */}
+      <Row label="Zone de chargement">
+        <span style={{ color: min.color, fontFamily: 'monospace', fontWeight: 700 }}>{zone.code}</span>
+        <span style={{ color: T.sub, marginLeft: 8, fontSize: 10 }}>{zone.nom}</span>
+      </Row>
+
+      <Row label="Type minerai">
+        <span style={{ color: min.color }}>{min.label}</span>
+        <span style={{ color: T.faint, fontSize: 10, marginLeft: 12 }}>file max {zone.capacite_queue} HU</span>
+      </Row>
+
+      <Row label="Déchargement">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {zone.dumps.length === 0 ? (
+            <span style={{ color: T.faint, fontStyle: 'italic' }}>aucun dump configuré</span>
+          ) : zone.dumps.map(d => {
+            const dt = DUMP_TYPE[d.type] ?? { label: d.type, color: T.sub };
+            return (
+              <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ color: dt.color }}>▸</span>
+                <span style={{ color: T.text, fontFamily: 'monospace', fontWeight: 600, width: 46, flexShrink: 0 }}>{d.code}</span>
+                <span style={{ color: T.sub, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nom}</span>
+                <span style={{ color: T.faint, fontSize: 10, whiteSpace: 'nowrap' }}>{d.distance_km}km · {d.duree_min}min</span>
+              </div>
+            );
+          })}
+        </div>
+      </Row>
+
+      {/* ── Statuts HU ── */}
+      <div style={{ padding: '6px 12px', borderBottom: `1px solid ${T.border}`, display: 'flex', gap: 14, fontSize: 11 }}>
+        <span style={{ color: '#22c55e' }}>{zone.nb_dispos} <span style={{ color: T.faint, fontSize: 10 }}>dispo</span></span>
+        <span style={{ color: '#f59e0b' }}>{zone.nb_file} <span style={{ color: T.faint, fontSize: 10 }}>file</span></span>
+        <span style={{ color: '#3b82f6' }}>{zone.nb_en_route} <span style={{ color: T.faint, fontSize: 10 }}>route</span></span>
+        <span style={{ color: T.sub, marginLeft: 'auto', fontSize: 10 }}>{Math.round(Number(zone.tonnes_jour))} t/j</span>
+      </div>
+
+      {/* ── Dispatch ── */}
+      <div style={{ padding: '8px 12px' }}>
+        <button
+          onClick={onDispatch}
+          disabled={zone.nb_dispos === 0}
+          style={{
+            width: '100%', padding: '6px', borderRadius: 5, fontSize: 11,
+            cursor: zone.nb_dispos > 0 ? 'pointer' : 'not-allowed',
+            border: `1px solid ${zone.nb_dispos > 0 ? min.color : T.border}`,
+            background: 'none',
+            color: zone.nb_dispos > 0 ? min.color : T.faint,
+          }}
+        >
+          {zone.nb_dispos > 0 ? `dispatch — ${zone.code}` : 'aucun HU disponible'}
+        </button>
+      </div>
+    </div>
   );
 }
